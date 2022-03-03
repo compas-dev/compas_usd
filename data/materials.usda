@@ -1,0 +1,59 @@
+#usda 1.0
+
+def Scope "Looks"
+{
+    def Material "grey"
+    {
+        token outputs:surface.connect = </Looks/grey/Shader.outputs:out>
+
+        def Shader "Shader"
+        {
+            uniform token info:id = "mdlMaterial"
+            uniform token info:implementationSource = "sourceAsset"
+            uniform asset info:mdl:sourceAsset = @./../materials/grey.mdl@
+            custom token info:mdl:sourceAsset:subIdentifier = "grey"
+            token outputs:out
+        }
+    }
+
+    def Material "blue"
+    {
+        token outputs:surface.connect = </Looks/blue/Shader.outputs:out>
+
+        def Shader "Shader"
+        {
+            uniform token info:id = "mdlMaterial"
+            uniform token info:implementationSource = "sourceAsset"
+            uniform asset info:mdl:sourceAsset = @./../materials/blue.mdl@
+            custom token info:mdl:sourceAsset:subIdentifier = "blue"
+            token outputs:out
+        }
+    }
+
+    def Material "preview_surface"
+    {
+        token outputs:displacement.connect = </Looks/preview_surface/Shader.outputs:displacement>
+        token outputs:surface.connect = </Looks/preview_surface/Shader.outputs:surface>
+
+        def Shader "Shader"
+        {
+            uniform token info:id = "UsdPreviewSurface"
+            float inputs:clearcoat = 0
+            float inputs:clearcoatRoughness = 0.01
+            color3f inputs:diffuseColor
+            float inputs:displacement = 0
+            color3f inputs:emissiveColor
+            float inputs:ior = 1.5
+            float inputs:metallic
+            normal3f inputs:normal
+            float inputs:occlusion
+            float inputs:opacity
+            float inputs:roughness
+            color3f inputs:specularColor = (0, 0, 0)
+            int inputs:useSpecularWorkflow = 0
+            token outputs:displacement
+            token outputs:surface
+        }
+    }
+}
+
