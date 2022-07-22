@@ -11,9 +11,7 @@ class USDMaterial(object):
         self.stage = stage
 
         if not stage.GetPrimAtPath(materials_path):
-            prim = UsdGeom.Scope.Define(stage, materials_path)
-            print(prim)
-
+            UsdGeom.Scope.Define(stage, materials_path)
         
         material_path = Sdf.Path(materials_path).AppendChild(name)
         self.material = UsdShade.Material.Define(stage, material_path)
