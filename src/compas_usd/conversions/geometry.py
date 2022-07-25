@@ -16,7 +16,7 @@ def prim_from_box(stage, path, box):
     """
 
     prim = UsdGeom.Cube.Define(stage, path)
-    prim.GetPrim().GetAttribute('size').Set(1.0)
+    prim.GetPrim().GetAttribute("size").Set(1.0)
     UsdGeom.XformCommonAPI(prim).SetScale((box.xsize, box.ysize, box.zsize))
     apply_rotate_and_translate_on_prim(prim, box.frame)
     return prim
@@ -49,7 +49,7 @@ def prim_from_sphere(stage, path, sphere):
     UsdGeom.Sphere(Usd.Prim(</sphere>))
     """
     prim = UsdGeom.Sphere.Define(stage, path)
-    prim.GetPrim().GetAttribute('radius').Set(sphere.radius)
+    prim.GetPrim().GetAttribute("radius").Set(sphere.radius)
     UsdGeom.XformCommonAPI(prim).SetTranslate(tuple(sphere.point))
     return prim
 
@@ -83,4 +83,19 @@ def prim_from_transformation(stage, path, transformation):
     """
     prim = UsdGeom.Xform.Define(stage, path)
     apply_transformation_on_prim(prim, transformation)
+    return prim
+
+
+def prim_default(stage, path, transformation=None):
+    """Returns a ``pxr.UsdGeom.Xform``
+
+    Examples
+    --------
+    >>> transformation = Transformation()
+    >>> prim_default(stage, "/xform", transformation)
+    UsdGeom.Xform(Usd.Prim(</xform>))
+    """
+    prim = UsdGeom.Xform.Define(stage, path)
+    if transformation:
+        apply_transformation_on_prim(prim, transformation)
     return prim
