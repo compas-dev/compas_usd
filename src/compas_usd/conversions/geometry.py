@@ -1,12 +1,14 @@
 from pxr import UsdGeom
 from compas.geometry import Frame
+from compas.geometry import Box
 from compas.utilities import flatten
 from .transformations import apply_rotate_and_translate_on_prim
 from .transformations import apply_transformation_on_prim
+from .transformations import frame_and_scale_from_prim
 
 
 def prim_from_box(stage, path, box):
-    """Returns a `UsdGeom.Cube`
+    """Returns a :class:`UsdGeom.Cube`
 
     Examples
     --------
@@ -22,8 +24,24 @@ def prim_from_box(stage, path, box):
     return prim
 
 
+def box_from_prim(prim):
+    """Returns a :class:`compas.geometry.Box`
+
+    Examples
+    --------
+    >>> box = Box(Frame.worldXY(), 1, 1, 1)
+    >>> prim = prim_from_box(stage, "/box", box)
+    >>> box_from_prim(prim)
+    Box(Frame(Point(0.000, 0.000, 0.000), Vector(1.000, -0.000, 0.000), Vector(0.000, 1.000, -0.000)), 1.0, 1.0, 1.0)
+    """
+    size = prim.GetPrim().GetAttribute("size").Get()
+    frame, scale = frame_and_scale_from_prim(prim)
+    xsize, ysize, zsize = scale
+    return Box(frame, xsize * size, ysize * size, zsize * size)
+
+
 def prim_from_cylinder(stage, path, cylinder):
-    """Returns a `UsdGeom.Cylinder`
+    """Returns a :class:`UsdGeom.Cylinder`
 
     Examples
     --------
@@ -99,3 +117,12 @@ def prim_default(stage, path, transformation=None):  # TODO: This is almost iden
     if transformation:
         apply_transformation_on_prim(prim, transformation)
     return prim
+
+
+if __name__ == "__main__":
+    from pxr import Usd
+
+    stage = Usd.Stage.CreateInMemory()
+    box = Box(Frame.worldXY(), 1, 1, 1)
+    prim = prim_from_box(stage, "/box", box)
+    print(box_from_prim(prim))

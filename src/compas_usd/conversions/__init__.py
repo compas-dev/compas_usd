@@ -10,7 +10,7 @@ compas_usd.conversions
 """
 from __future__ import absolute_import
 
-from .geometry import prim_from_box, prim_from_cylinder, prim_from_sphere, prim_from_mesh, prim_from_transformation, prim_default
+from .geometry import prim_from_box, box_from_prim, prim_from_cylinder, prim_from_sphere, prim_from_mesh, prim_from_transformation, prim_default
 from .transformations import (
     gfmatrix4d_from_transformation,
     transformation_from_gfmatrix4d,
@@ -23,6 +23,7 @@ from .transformations import (
 
 __all__ = [
     "prim_from_box",
+    "box_from_prim",
     "prim_from_cylinder",
     "prim_from_sphere",
     "prim_from_mesh",
