@@ -86,7 +86,7 @@ def prim_from_transformation(stage, path, transformation):
     return prim
 
 
-def prim_default(stage, path, transformation=None):
+def prim_default(stage, path, transformation=None):  # TODO: This is almost identical to prim_from_transformation
     """Returns a ``pxr.UsdGeom.Xform``
 
     Examples
