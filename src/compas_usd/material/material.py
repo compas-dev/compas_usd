@@ -315,14 +315,14 @@ class USDPrimvarReaderFloat2(object):
         self.output = primvar.CreateOutput("result", Sdf.ValueTypeNames.Float2)
 
 
-class USDUVTextureWrapMode(Enum):
+class USDUVTextureWrapMode(Enum):  # NEEDED?
     BLACK = "black"
     CLAMP = "clamp"
     REPEAT = "repeat"
     MIRROR = "mirror"
 
 
-class TextureWrap(Enum):
+class TextureWrap(Enum):  # NEEDED?
     CLAMP_TO_EDGE = 33071
     MIRRORED_REPEAT = 33648
     REPEAT = 10497
