@@ -1,3 +1,7 @@
+"""
+# https://github.com/kcoley/gltf2usd/blob/master/Source/_gltf2usd/usd_material.py
+# https://github.com/ColinKennedy/USD-Cookbook/blob/master/concepts/mesh_with_materials/python/material.py
+"""
 import os
 
 from enum import Enum
@@ -16,25 +20,35 @@ class AlphaMode(object):  # todo import from somewhere else?
 class USDMaterial(object):
     """Wrapper about UsdShade.Material"""
 
-    def __init__(self, stage, name, materials_path="/Looks"):
+    def __init__(self, stage, name=None, path=None, materials_path="/Looks", textures=None, image_uris=None):
         self.stage = stage
+        self.textures = textures
+        self.image_uris = image_uris
 
         if not stage.GetPrimAtPath(materials_path):
             UsdGeom.Scope.Define(stage, materials_path)
 
-        material_path = Sdf.Path(materials_path).AppendChild(name)
-        self.material = UsdShade.Material.Define(stage, material_path)
-        self.surface_output = self.material.CreateOutput("surface", Sdf.ValueTypeNames.Token)
-        self.displacement_output = self.material.CreateOutput("displacement", Sdf.ValueTypeNames.Token)
+        if name:
+            material_path = Sdf.Path(materials_path).AppendChild(name)
+            self.material = UsdShade.Material.Define(stage, material_path)
+            self.surface_output = self.material.CreateOutput("surface", Sdf.ValueTypeNames.Token)
+            self.displacement_output = self.material.CreateOutput("displacement", Sdf.ValueTypeNames.Token)
+        elif path:
+            material_path = path
+            self.material = stage.GetPrimAtPath(path)
+            print(self.material.GetTypeName())
+            print("self.material ", self.material)
+        else:
+            raise ValueError("Please pass name or path")
 
     def GetPath(self):
         return self.material.GetPath()
 
     @classmethod
-    def from_material(cls, stage, material):
+    def from_material(cls, stage, material, image_uris=None, textures=None):  # TODO: move to compas_xr?
         """Create a material from a :class:compas_xr.datastructures.material"""
-        umat = cls(stage, material.name)
-        USDPreviewSurface.from_material(material, stage, umat)
+        umat = cls(stage, material.name, image_uris=image_uris, textures=textures)
+        umat.shader = USDPreviewSurface.from_material(material, stage, umat)
         return umat
 
     @classmethod
@@ -58,9 +72,46 @@ class USDMaterial(object):
         # later: UsdShade.MaterialBindingAPI(prim).Bind(material)
         return umat
 
+    @classmethod
+    def from_path(cls, stage, path):
+        return cls(stage, path=path)
+
     def to_compas(self):
         """Create a :class:`compas_xr.datastructures.Material`"""
-        raise NotImplementedError
+        from compas_xr.datastructures import Material
+
+        shader_path = self.GetPath().AppendChild("Shader")
+        shader = self.stage.GetPrimAtPath(shader_path)
+
+        for name in shader.GetPropertyNames():
+            if name in ["info:id", "info:implementationSource", "outputs:displacement", "outputs:surface"]:
+                continue
+
+            "inputs:clearcoat"
+            "inputs:clearcoatRoughness"
+            "inputs:diffuseColor"
+            "inputs:displacement"
+            "inputs:emissiveColor"
+            "inputs:ior"
+            "inputs:metallic"
+            "inputs:normal"
+            "inputs:occlusion"
+            "inputs:opacity"
+            "inputs:roughness"
+            "inputs:specularColor"
+            "inputs:useSpecularWorkflow"
+
+        return Material(
+            name=None,
+            pbr_metallic_roughness=None,
+            normal_texture=None,
+            occlusion_texture=None,
+            emissive_texture=None,
+            emissive_factor=None,
+            alpha_mode=None,
+            alpha_cutoff=None,
+            double_sided=True,
+        )
 
 
 class USDPreviewSurface(object):
@@ -69,23 +120,18 @@ class USDPreviewSurface(object):
     def __init__(self, stage, material, scale_texture=False):
         self.stage = stage
         self.scale_texture = scale_texture
-        self.material = material
-        # self.output_directory = output_directory # for images
+        self.material = material  # USDMaterial
         self.shader = UsdShade.Shader.Define(stage, material.GetPath().AppendChild("Shader"))  # why not already defined in material.. multiple shader possible?
         self.shader.CreateIdAttr("UsdPreviewSurface")
-        self._initialize_material()
 
-    def _initialize_material(self):
+        # initialize_material
         shader = self.shader
         self._use_specular_workflow = shader.CreateInput("useSpecularWorkflow", Sdf.ValueTypeNames.Int)
         self._use_specular_workflow.Set(False)
-
         surface_output = shader.CreateOutput("surface", Sdf.ValueTypeNames.Token)
         self.material.surface_output.ConnectToSource(surface_output)
-
         displacement_output = shader.CreateOutput("displacement", Sdf.ValueTypeNames.Token)
         self.material.displacement_output.ConnectToSource(displacement_output)
-
         self._specular_color = shader.CreateInput("specularColor", Sdf.ValueTypeNames.Color3f)
         self._specular_color.Set((0.0, 0.0, 0.0))
         self._metallic = shader.CreateInput("metallic", Sdf.ValueTypeNames.Float)
@@ -104,8 +150,8 @@ class USDPreviewSurface(object):
         self._emissive_color = shader.CreateInput("emissiveColor", Sdf.ValueTypeNames.Color3f)
         self._diffuse_color = shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f)
 
-        # self._st0 = USDPrimvarReaderFloat2(self._stage, self._usd_material._material_path, 'st0')
-        # self._st1 = USDPrimvarReaderFloat2(self._stage, self._usd_material._material_path, 'st1')
+        self._st0 = USDPrimvarReaderFloat2(self.stage, self.material.GetPath(), "st0")
+        self._st1 = USDPrimvarReaderFloat2(self.stage, self.material.GetPath(), "st1")
 
     @classmethod
     def from_material(cls, material, stage, usd_material):
@@ -113,187 +159,129 @@ class USDPreviewSurface(object):
         ps._set_normal_texture(material)
         ps._set_emissive_texture(material)
         ps._set_occlusion_texture(material)
-        # self._set_khr_material_pbr_specular_glossiness(gltf_material) # extensions!
+        ps._set_pbr_specular_glossiness(material)
         ps._set_pbr_metallic_roughness(material)
         return ps
+
+    def _texture_info_by_index(self, index):
+        texture_info = self.material.textures[index]
+        texture_info.file = self.material.image_uris[texture_info.source]  # TODO: not so elegant
+        return texture_info
+
+    def _uv_texture(self, name, texture_info, scale_factor):
+        return USDUVTexture(name, self.stage, self.material, texture_info, scale_factor, [self._st0, self._st1])
+
+    def _apply_on_shader(self, uv_texture, mode, apply_on):
+        texture_shader = uv_texture.get_shader()
+        if mode == "rgb":
+            texture_shader.CreateOutput("rgb", Sdf.ValueTypeNames.Float3)
+        elif mode == "r":
+            texture_shader.CreateOutput("r", Sdf.ValueTypeNames.Float)
+        elif mode == "a":
+            texture_shader.CreateOutput("a", Sdf.ValueTypeNames.Float)
+        apply_on.ConnectToSource(texture_shader.ConnectableAPI(), mode)
 
     def _set_normal_texture(self, material):
         normal_texture = material.normal_texture
         if normal_texture is None:
             self._normal.Set((0, 0, 1))
         else:
-            destination = normal_texture.write_to_directory(self.output_directory, GLTFImage.ImageColorChannels.RGB)
-            normal_scale = normal_texture.scale
-            scale_factor = (normal_scale, normal_scale, normal_scale, 1.0)
-            usd_uv_texture = USDUVTexture("normalTexture", self._stage, self._usd_material._usd_material, normal_texture, [self._st0, self._st1])
-            usd_uv_texture._file_asset.Set(destination)
-            usd_uv_texture._scale.Set(scale_factor)
-            usd_uv_texture._fallback.Set(scale_factor)
-            texture_shader = usd_uv_texture.get_shader()
-            texture_shader.CreateOutput("rgb", Sdf.ValueTypeNames.Float3)
-            self._normal.ConnectToSource(texture_shader, "rgb")
+            scale_factor = normal_texture.scale + [1.0]
+            texture_info = self._texture_info_by_index(normal_texture.index)
+            uv_texture = self._uv_texture("normalTexture", texture_info, scale_factor)
+            self._apply_on_shader(uv_texture, "rgb", self._normal)
 
-    def _set_emissive_texture(self, gltf_material):
-        emissive_texture = gltf_material.emissive_texture
-        emissive_factor = gltf_material.emissive_factor
-        if not emissive_texture:
+    def _set_emissive_texture(self, material):
+        emissive_texture = material.emissive_texture
+        emissive_factor = material.emissive_factor
+        if emissive_texture is None:
             self._emissive_color.Set((0, 0, 0))
         else:
-            destination = emissive_texture.write_to_directory(self._output_directory, GLTFImage.ImageColorChannels.RGB)
-            scale_factor = (emissive_factor[0], emissive_factor[1], emissive_factor[2], 1.0)
-            usd_uv_texture = USDUVTexture("emissiveTexture", self._stage, self._usd_material._usd_material, emissive_texture, [self._st0, self._st1])
-            usd_uv_texture._file_asset.Set(destination)
-            usd_uv_texture._scale.Set(scale_factor)
-            usd_uv_texture._fallback.Set(scale_factor)
-            texture_shader = usd_uv_texture.get_shader()
-            texture_shader.CreateOutput("rgb", Sdf.ValueTypeNames.Float3)
-            self._emissive_color.ConnectToSource(texture_shader, "rgb")
+            scale_factor = emissive_factor + [1.0]
+            texture_info = self._texture_info_by_index(emissive_texture.index)
+            uv_texture = self._uv_texture("normalTexture", texture_info, scale_factor)
+            self._apply_on_shader(uv_texture, "rgb", self._emissive_color)
 
-    def _set_occlusion_texture(self, gltf_material):
-        occlusion_texture = gltf_material.occlusion_texture
-        if not occlusion_texture:
+    def _set_occlusion_texture(self, material):
+        occlusion_texture = material.occlusion_texture
+        if occlusion_texture is None:
             self._occlusion.Set(1.0)
         else:
-            destination = occlusion_texture.write_to_directory(self._output_directory, GLTFImage.ImageColorChannels.R)
-            occlusion_strength = occlusion_texture.strength
-            strength_factor = (occlusion_strength, occlusion_strength, occlusion_strength, 1.0)
-            usd_uv_texture = USDUVTexture("occlusionTexture", self._stage, self._usd_material._usd_material, occlusion_texture, [self._st0, self._st1])
-            usd_uv_texture._file_asset.Set(destination)
-            usd_uv_texture._scale.Set(strength_factor)
-            usd_uv_texture._fallback.Set(strength_factor)
-            texture_shader = usd_uv_texture.get_shader()
-            texture_shader.CreateOutput("r", Sdf.ValueTypeNames.Float)
-            self._occlusion.ConnectToSource(texture_shader, "r")
+            strength = occlusion_texture.strength
+            scale_factor = [strength, strength, strength, 1.0]
+            texture_info = self._texture_info_by_index(occlusion_texture.index)
+            uv_texture = self._uv_texture("occlusionTexture", texture_info, scale_factor)
+            self._apply_on_shader(uv_texture, "r", self._occlusion)
 
     def _set_pbr_metallic_roughness(self, gltf_material):
         pbr_metallic_roughness = gltf_material.pbr_metallic_roughness
-        if pbr_metallic_roughness:
+        if pbr_metallic_roughness is not None:
             self._set_pbr_base_color(pbr_metallic_roughness, gltf_material.alpha_mode)
             self._set_pbr_metallic(pbr_metallic_roughness)
             self._set_pbr_roughness(pbr_metallic_roughness)
 
-    def _set_khr_material_pbr_specular_glossiness(self, gltf_material):
-        extensions = gltf_material.extensions
-        if "KHR_materials_pbrSpecularGlossiness" not in extensions:
-            self._set_pbr_metallic_roughness(gltf_material)
+    def _set_pbr_specular_glossiness(self, material):
+        if material.pbr_specular_glossiness is None:
+            self._set_pbr_metallic_roughness(material)
         else:
             self._use_specular_workflow.Set(True)
-            pbr_specular_glossiness = extensions["KHR_materials_pbrSpecularGlossiness"]
-            self._set_pbr_specular_glossiness_diffuse(pbr_specular_glossiness)
-            self._set_pbr_specular_glossiness_glossiness(pbr_specular_glossiness)
-            self._set_pbr_specular_glossiness_specular(pbr_specular_glossiness)
+            self._set_pbr_specular_glossiness_diffuse(material.pbr_specular_glossiness)
+            self._set_pbr_specular_glossiness_glossiness(material.pbr_specular_glossiness)
+            self._set_pbr_specular_glossiness_specular(material.pbr_specular_glossiness)
 
     def _set_pbr_specular_glossiness_diffuse(self, pbr_specular_glossiness):
-        diffuse_texture = pbr_specular_glossiness.get_diffuse_texture()
-        diffuse_factor = pbr_specular_glossiness.get_diffuse_factor()
+        diffuse_texture = pbr_specular_glossiness.diffuse_texture
+        diffuse_factor = pbr_specular_glossiness.diffuse_factor
         if not diffuse_texture:
             self._diffuse_color.Set(Gf.Vec3f(diffuse_factor[0], diffuse_factor[1], diffuse_factor[2]))
         else:
-            destination = diffuse_texture.write_to_directory(self._output_directory, GLTFImage.ImageColorChannels.RGB)
-            scale_factor = tuple(diffuse_factor)
-            usd_uv_texture = USDUVTexture("diffuseTexture", self._stage, self._usd_material._usd_material, diffuse_texture, [self._st0, self._st1])
-            usd_uv_texture._file_asset.Set(destination)
-            usd_uv_texture._scale.Set(scale_factor)
-            usd_uv_texture._fallback.Set(scale_factor)
-            texture_shader = usd_uv_texture.get_shader()
-            texture_shader.CreateOutput("rgb", Sdf.ValueTypeNames.Float3)
-            texture_shader.CreateOutput("a", Sdf.ValueTypeNames.Float)
-            self._diffuse_color.ConnectToSource(texture_shader, "rgb")
-            self._opacity.ConnectToSource(texture_shader, "a")
-
-    def _uv_texture(self, name, specular_glossiness_texture, destination, scale_factor, apply_on, mode):
-
-        usd_uv_texture = USDUVTexture(name, self._stage, self._usd_material._usd_material, specular_glossiness_texture, [self._st0, self._st1])
-        usd_uv_texture._file_asset.Set(destination)
-        usd_uv_texture._scale.Set(scale_factor)
-        usd_uv_texture._fallback.Set(scale_factor)
-        texture_shader = usd_uv_texture.get_shader()
-        if mode == "rgb":
-            texture_shader.CreateOutput("rgb", Sdf.ValueTypeNames.Float3)
-        elif mode == "r":
-            texture_shader.CreateOutput("r", Sdf.ValueTypeNames.Float)
-        apply_on.ConnectToSource(texture_shader, mode)
-        return texture_shader
+            scale_factor = diffuse_factor  # TODO: this is scale? or set from diffuse_texture_info.scale
+            texture_info = self._texture_info_by_index(diffuse_texture.index)
+            uv_texture = self._uv_texture("diffuseTexture", texture_info, scale_factor)
+            self._apply_on_shader(uv_texture, "rgb", self._diffuse_color)
+            self._apply_on_shader(uv_texture, "a", self._opacity)
 
     def _set_pbr_specular_glossiness_specular(self, pbr_specular_glossiness):
-        specular_glossiness_texture = pbr_specular_glossiness.get_specular_glossiness_texture()
-
-        specular_factor = tuple(pbr_specular_glossiness.get_specular_factor())
+        specular_glossiness_texture = pbr_specular_glossiness.specular_glossiness_texture
+        specular_factor = pbr_specular_glossiness.specular_factor or [1.0, 1.0, 1.0]  # TODO: defaults in material
         if not specular_glossiness_texture:
-            self._specular_color.Set(specular_factor)
+            self._specular_color.Set(tuple(specular_factor))
         else:
-            scale_factor = (specular_factor[0], specular_factor[1], specular_factor[2], 1)
-            destination = specular_glossiness_texture.write_to_directory(self._output_directory, GLTFImage.ImageColorChannels.RGB, "specular")
-
-            self._uv_texture("specularTexture", specular_glossiness_texture, destination, scale_factor, self._specular_color, "rgb")
-            """
-            usd_uv_texture = USDUVTexture("specularTexture", self._stage, self._usd_material._usd_material, specular_glossiness_texture, [self._st0, self._st1])
-            usd_uv_texture._file_asset.Set(destination)
-            usd_uv_texture._scale.Set(scale_factor)
-            usd_uv_texture._fallback.Set(scale_factor)
-            texture_shader = usd_uv_texture.get_shader()
-            texture_shader.CreateOutput('rgb', Sdf.ValueTypeNames.Float3)
-            self._specular_color.ConnectToSource(texture_shader, 'rgb')
-            """
+            scale_factor = specular_factor + [1]
+            texture_info = self._texture_info_by_index(specular_glossiness_texture.index)
+            uv_texture = self._uv_texture("specularTexture", texture_info, scale_factor)
+            self._apply_on_shader(uv_texture, "rgb", self._specular_color)
 
     def _set_pbr_specular_glossiness_glossiness(self, pbr_specular_glossiness):
-        specular_glossiness_texture = pbr_specular_glossiness.get_specular_glossiness_texture()
-        roughness_factor = 1 - pbr_specular_glossiness.get_glossiness_factor()
-        if not specular_glossiness_texture:
+        specular_glossiness_texture = pbr_specular_glossiness.specular_glossiness_texture
+        glossiness_factor = pbr_specular_glossiness.glossiness_factor or 1.0
+        roughness_factor = 1 - glossiness_factor
+        if specular_glossiness_texture is None:
             self._roughness.Set(roughness_factor)
         else:
-            destination = specular_glossiness_texture.write_to_directory(self._output_directory, GLTFImage.ImageColorChannels.A, "glossiness")
-            scale_factor = (-1, -1, -1, -1)
-
-            self._uv_texture("glossinessTexture", specular_glossiness_texture, destination, scale_factor, self._roughness, "r")
-            """
-            usd_uv_texture = USDUVTexture("glossinessTexture", self._stage, self._usd_material._usd_material, specular_glossiness_texture, [self._st0, self._st1])
-            usd_uv_texture._file_asset.Set(destination)
-            usd_uv_texture._bias.Set((1.0, 1.0, 1.0, 1.0))
-            usd_uv_texture._scale.Set(scale_factor)
-            usd_uv_texture._fallback.Set(scale_factor)
-            texture_shader = usd_uv_texture.get_shader()
-            texture_shader.CreateOutput('r', Sdf.ValueTypeNames.Float)
-            self._roughness.ConnectToSource(texture_shader, 'r')
-            """
+            scale_factor = [-1, -1, -1, -1]
+            texture_info = self._texture_info_by_index(specular_glossiness_texture.index)
+            uv_texture = self._uv_texture("glossinessTexture", texture_info, scale_factor)
+            self._apply_on_shader(uv_texture, "r", self._roughness)
 
     def _set_pbr_base_color(self, pbr_metallic_roughness, alpha_mode):
         base_color_texture = pbr_metallic_roughness.base_color_texture
-        base_color_scale = pbr_metallic_roughness.base_color_factor
+        base_color_scale = pbr_metallic_roughness.base_color_factor or [1.0, 1.0, 1.0, 1.0]
         alpha_mode = alpha_mode or AlphaMode.OPAQUE
-        print(alpha_mode)
-        # if AlphaMode(alpha_mode) != AlphaMode.OPAQUE:
-        #    if AlphaMode(alpha_mode) == AlphaMode.MASK:
-        #        print('Alpha Mask not supported in USDPreviewSurface!  Using Alpha Blend...')
+        if alpha_mode == AlphaMode.MASK:
+            alpha_mode = AlphaMode.BLEND  # Alpha Mask not supported in USDPreviewSurface
 
-        if not base_color_texture:
-            self._diffuse_color.Set(tuple(base_color_scale[0:3]))
+        if base_color_texture is None:
+            self._diffuse_color.Set(tuple(base_color_scale[:3]))
             if alpha_mode != AlphaMode.OPAQUE:
                 self._opacity.Set(base_color_scale[3])
         else:
-            if AlphaMode(alpha_mode) == AlphaMode.OPAQUE:
-                destination = base_color_texture.write_to_directory(self._output_directory, GLTFImage.ImageColorChannels.RGB)
-                scale_factor = (base_color_scale[0], base_color_scale[1], base_color_scale[2], base_color_scale[3])
-            else:
-                destination = base_color_texture.write_to_directory(self._output_directory, GLTFImage.ImageColorChannels.RGBA)
-                scale_factor = tuple(base_color_scale[0:4])
-
-            texture_shader = self._uv_texture("baseColorTexture", base_color_texture, destination, scale_factor, self._diffuse_color, "rgb")
+            scale_factor = base_color_scale
+            texture_info = self._texture_info_by_index(base_color_texture.index)
+            uv_texture = self._uv_texture("baseColorTexture", texture_info, scale_factor)
+            self._apply_on_shader(uv_texture, "rgb", self._diffuse_color)
             if AlphaMode(alpha_mode) != AlphaMode.OPAQUE:
-                texture_shader.CreateOutput("a", Sdf.ValueTypeNames.Float)
-                self._opacity.ConnectToSource(texture_shader, "a")
-            """
-            usd_uv_texture = USDUVTexture("baseColorTexture", self._stage, self._usd_material._usd_material, base_color_texture, [self._st0, self._st1])
-            usd_uv_texture._file_asset.Set(destination)
-            usd_uv_texture._scale.Set(scale_factor)
-            usd_uv_texture._fallback.Set(scale_factor)
-            texture_shader = usd_uv_texture.get_shader()
-            texture_shader.CreateOutput('rgb', Sdf.ValueTypeNames.Float3)
-            texture_shader.CreateOutput('a', Sdf.ValueTypeNames.Float)
-            self._diffuse_color.ConnectToSource(texture_shader, 'rgb')
-            if AlphaMode(alpha_mode) != AlphaMode.OPAQUE:
-                self._opacity.ConnectToSource(texture_shader, 'a')
-            """
+                self._apply_on_shader(uv_texture, "a", self._opacity)
 
     def _set_pbr_metallic(self, pbr_metallic_roughness):
         metallic_roughness_texture = pbr_metallic_roughness.metallic_roughness_texture
@@ -301,21 +289,10 @@ class USDPreviewSurface(object):
         if not metallic_roughness_texture or metallic_factor == 0:
             self._metallic.Set(metallic_factor)
         else:
-            scale_texture = None
-            scale_factor = tuple([metallic_factor] * 4)
-            usd_uv_texture = USDUVTexture("metallicTexture", self._stage, self._usd_material._usd_material, metallic_roughness_texture, [self._st0, self._st1])
-            if self._scale_texture:
-                scale_texture = scale_factor
-                usd_uv_texture._scale.Set(tuple([1.0] * 4))
-            else:
-                usd_uv_texture._scale.Set(scale_factor)
-            destination = metallic_roughness_texture.write_to_directory(self._output_directory, GLTFImage.ImageColorChannels.B, "metallic", scale_texture)
-
-            usd_uv_texture._file_asset.Set(destination)
-            usd_uv_texture._fallback.Set(scale_factor)
-            texture_shader = usd_uv_texture.get_shader()
-            texture_shader.CreateOutput("r", Sdf.ValueTypeNames.Float)
-            self._metallic.ConnectToSource(texture_shader, "r")
+            scale_factor = [metallic_factor for _ in range(4)]
+            texture_info = self._texture_info_by_index(metallic_roughness_texture.index)
+            uv_texture = self._uv_texture("metallicTexture", texture_info, scale_factor)
+            self._apply_on_shader(uv_texture, "r", self._metallic)
 
     def _set_pbr_roughness(self, pbr_metallic_roughness):
         metallic_roughness_texture = pbr_metallic_roughness.metallic_roughness_texture
@@ -323,21 +300,10 @@ class USDPreviewSurface(object):
         if not metallic_roughness_texture or roughness_factor == 0:
             self._roughness.Set(roughness_factor)
         else:
-            scale_texture = None
-            scale_factor = tuple([roughness_factor] * 4)
-            usd_uv_texture = USDUVTexture("roughnessTexture", self._stage, self._usd_material._usd_material, metallic_roughness_texture, [self._st0, self._st1])
-            if self._scale_texture:
-                scale_texture = scale_factor
-                usd_uv_texture._scale.Set(tuple([1.0] * 4))
-            else:
-                usd_uv_texture._scale.Set(scale_factor)
-
-            destination = metallic_roughness_texture.write_to_directory(self._output_directory, GLTFImage.ImageColorChannels.G, "roughness", scale_texture)
-            usd_uv_texture._file_asset.Set(destination)
-            usd_uv_texture._fallback.Set(scale_factor)
-            texture_shader = usd_uv_texture.get_shader()
-            texture_shader.CreateOutput("r", Sdf.ValueTypeNames.Float)
-            self._roughness.ConnectToSource(texture_shader, "r")
+            scale_factor = [roughness_factor for i in range(4)]
+            texture_info = self._texture_info_by_index(metallic_roughness_texture.index)
+            uv_texture = self._uv_texture("roughnessTexture", texture_info, scale_factor)
+            self._apply_on_shader(uv_texture, "r", self._roughness)
 
 
 class USDPrimvarReaderFloat2(object):
@@ -346,10 +312,7 @@ class USDPrimvarReaderFloat2(object):
         primvar.CreateIdAttr("UsdPrimvarReader_float2")
         primvar.CreateInput("fallback", Sdf.ValueTypeNames.Float2).Set((0, 0))
         primvar.CreateInput("varname", Sdf.ValueTypeNames.Token).Set(var_name)
-        self._output = primvar.CreateOutput("result", Sdf.ValueTypeNames.Float2)
-
-    def get_output(self):
-        return self._output
+        self.output = primvar.CreateOutput("result", Sdf.ValueTypeNames.Float2)
 
 
 class USDUVTextureWrapMode(Enum):
@@ -372,52 +335,135 @@ class USDUVTexture(object):
         TextureWrap.REPEAT.name: "repeat",
     }
 
-    def __init__(self, name, stage, usd_material, gltf_texture, usd_primvar_st_arr):
+    def __init__(self, name, stage, usd_material, texture, scale_factor, usd_primvar_st_arr):
 
         material_path = usd_material.GetPath()
-
         self._texture_shader = UsdShade.Shader.Define(stage, material_path.AppendChild(name))
-        self._texture_shader.CreateIdAttr("UsdUVTexture")
-
-        self._wrap_s = self._texture_shader.CreateInput("wrapS", Sdf.ValueTypeNames.Token)
-        self._wrap_s.Set(USDUVTexture.TEXTURE_SAMPLER_WRAP[gltf_texture.get_wrap_s().name])
-
-        self._wrap_t = self._texture_shader.CreateInput("wrapT", Sdf.ValueTypeNames.Token)
-        self._wrap_t.Set(USDUVTexture.TEXTURE_SAMPLER_WRAP[gltf_texture.get_wrap_t().name])
-
+        self._texture_shader.CreateIdAttr(texture.name)
+        # self._wrap_s = self._texture_shader.CreateInput("wrapS", Sdf.ValueTypeNames.Token)
+        # self._wrap_s.Set(USDUVTexture.TEXTURE_SAMPLER_WRAP[texture.get_wrap_s().name])
+        # self._wrap_t = self._texture_shader.CreateInput("wrapT", Sdf.ValueTypeNames.Token)
+        # self._wrap_t.Set(USDUVTexture.TEXTURE_SAMPLER_WRAP[texture.get_wrap_t().name])
         self._bias = self._texture_shader.CreateInput("bias", Sdf.ValueTypeNames.Float4)
         self._bias.Set((0, 0, 0, 0))
-
+        if scale_factor is None:
+            scale_factor = (1, 1, 1, 1)
+            fallback = (0, 0, 0, 1)
+        else:
+            scale_factor = tuple(scale_factor)
+            fallback = tuple(fallback)
         self._scale = self._texture_shader.CreateInput("scale", Sdf.ValueTypeNames.Float4)
-        self._scale.Set((1, 1, 1, 1))
-
+        self._scale.Set(scale_factor)
         self._file_asset = self._texture_shader.CreateInput("file", Sdf.ValueTypeNames.Asset)
-        self._file_asset.Set(gltf_texture.get_image_path())
-
+        self._file_asset.Set(texture.file)
         self._fallback = self._texture_shader.CreateInput("fallback", Sdf.ValueTypeNames.Float4)
-        self._fallback.Set((0, 0, 0, 1))
-
+        self._fallback.Set(fallback)
         self._st = self._texture_shader.CreateInput("st", Sdf.ValueTypeNames.Float2)
-
-        self._st.ConnectToSource(usd_primvar_st_arr[gltf_texture.get_texcoord_index()].get_output())
+        # self._st.ConnectToSource(usd_primvar_st_arr[texture.get_texcoord_index()].get_output())
 
     def get_shader(self):
         return self._texture_shader
 
 
 if __name__ == "__main__":
-    from pxr import Usd
-    from compas_usd import DATA
 
-    # stage = Usd.Stage.CreateNew(os.path.join(DATA, "materials.usda"))
-    stage = Usd.Stage.CreateInMemory()
+    import compas
+    from compas.geometry import Box, Frame
+    from compas.datastructures import Mesh
+    from compas_xr.datastructures import Scene
+    from compas_xr.datastructures import Material
+    from compas_xr.datastructures import PBRMetallicRoughness
+    from compas_xr.datastructures.material import PBRSpecularGlossiness
+    from compas_xr.datastructures.material import Image
+    from compas_xr.datastructures.material import MineType
+    from compas_xr.datastructures.material import Texture
+    from compas_xr.datastructures.material import TextureInfo
+    from compas_xr.datastructures.material import TextureTransform
 
-    USDMaterial.from_mdl(stage, os.path.join(DATA, "materials", "grey.mdl"))
-    USDMaterial.from_mdl(stage, os.path.join(DATA, "materials", "blue.mdl"))
+    scene = Scene()
+    world = scene.add_layer("world")
 
-    material = USDMaterial(stage, "preview_surface")
-    preview_surface = USDPreviewSurface(stage, material)
+    dirname = os.path.join(compas.APPDATA, "data", "gltfs")
 
-    print(stage.GetRootLayer().ExportToString())
+    print(compas.APPDATA)
+    image_uri = "compas_icon_white.png"
+    image_file = os.path.join(dirname, image_uri)
+    image_data = Image(name=image_uri, mime_type=MineType.PNG, uri=image_file)
+    image_idx = scene.add_image(image_data)
+    texture = Texture(source=image_idx)
+    texture_idx = scene.add_texture(texture)
 
-    stage.GetRootLayer().Save()
+    texture = Texture(source=image_idx)
+    texture_idx2 = scene.add_texture(texture)
+
+    material = Material()
+    material.name = "Texture"
+    material.pbr_metallic_roughness = PBRMetallicRoughness()
+    material.pbr_metallic_roughness.metallic_factor = 0.0
+    material.pbr_metallic_roughness.base_color_texture = TextureInfo(index=texture_idx)
+    material_key = scene.add_material(material)
+
+    # add extension
+    material.pbr_specular_glossiness = PBRSpecularGlossiness()
+    material.pbr_specular_glossiness.diffuse_factor = [0.98, 0.98, 0.98, 1.0]
+    material.pbr_specular_glossiness.specular_factor = [0.0, 0.0, 0.0]
+    material.pbr_specular_glossiness.glossiness_factor = 0.0
+    texture_transform = TextureTransform(rotation=0.0, scale=[2.0, 2.0])
+    material.pbr_specular_glossiness.diffuse_texture = TextureInfo(texture_idx2)
+    material.pbr_specular_glossiness.diffuse_texture.texture_transform = texture_transform
+
+    # add box
+    box = Box(Frame.worldXY(), 1, 1, 1)
+    mesh = Mesh.from_shape(box)
+    mesh.quads_to_triangles()
+
+    node = scene.add_layer("mesh", parent=world, element=box, material=material_key)
+    print("node", node)
+
+    data_before = scene.data
+
+    scene = Scene.from_data(scene.data)
+
+    data_after = scene.data
+
+    print(data_before == data_after)
+
+    """
+    for k, v in data_before.items():
+        print(k)
+        if k == "materials":
+            for i, m in enumerate(data_before[k]):
+                for l, m in data_before[k][i].items():
+                    print(l)
+                    print(data_before[k][i][l])
+                    print(data_after[k][i][l])
+                    print()
+        else:
+            print(data_before[k])
+            print(data_after[k])
+
+        print()
+    """
+
+    normals = [mesh.vertex_normal(k) for k in mesh.vertices()]
+
+    texcoord_0 = [(0, 0) for _ in mesh.vertices()]
+
+    # would work better if each vertex could have 4 different texture coordinates
+    texcoord_0 = [
+        (0.0, 1.0),
+        (0.0, 0.0),
+        (1.0, 0.0),
+        (1.0, 1.0),
+        (0.0, 0.0),
+        (1.0, 0.0),
+        (1.0, 1.0),
+        (0.0, 1.0),
+    ]
+
+    """
+    pd = node.mesh_data.primitive_data_list[0]
+    pd.material = material_key
+    pd.attributes["TEXCOORD_0"] = texcoord_0
+    pd.attributes["NORMAL"] = normals
+    """
