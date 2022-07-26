@@ -2,6 +2,7 @@ import math
 from pxr import Gf
 from pxr import UsdGeom
 
+from compas.geometry import Frame
 from compas.geometry import Rotation
 from compas.geometry import Transformation
 from compas.geometry import transpose_matrix
@@ -58,20 +59,36 @@ def xform_rotate_from_frame(frame, rotation_order):
     list[float]
         Euler angles in degrees.
     """
-    switcher = {UsdGeom.XformCommonAPI.RotationOrderXYZ: "xyz",
-                UsdGeom.XformCommonAPI.RotationOrderXZY: "xzy",
-                UsdGeom.XformCommonAPI.RotationOrderYXZ: "yxz",
-                UsdGeom.XformCommonAPI.RotationOrderYZX: "yzx",
-                UsdGeom.XformCommonAPI.RotationOrderZXY: "zxy",
-                UsdGeom.XformCommonAPI.RotationOrderZYX: "zyx"}
+    switcher = {
+        UsdGeom.XformCommonAPI.RotationOrderXYZ: "xyz",
+        UsdGeom.XformCommonAPI.RotationOrderXZY: "xzy",
+        UsdGeom.XformCommonAPI.RotationOrderYXZ: "yxz",
+        UsdGeom.XformCommonAPI.RotationOrderYZX: "yzx",
+        UsdGeom.XformCommonAPI.RotationOrderZXY: "zxy",
+        UsdGeom.XformCommonAPI.RotationOrderZYX: "zyx",
+    }
 
     axes = switcher.get(rotation_order, None)
     return [math.degrees(a) for a in frame.euler_angles(False, axes)]
 
 
+def frame_and_scale_from_prim(prim):
+    translation, rotation, scale, _, rotOrder = UsdGeom.XformCommonAPI(prim).GetXformVectors(0)
+    switcher = {
+        UsdGeom.XformCommonAPI.RotationOrderXYZ: "xyz",
+        UsdGeom.XformCommonAPI.RotationOrderXZY: "xzy",
+        UsdGeom.XformCommonAPI.RotationOrderYXZ: "yxz",
+        UsdGeom.XformCommonAPI.RotationOrderYZX: "yzx",
+        UsdGeom.XformCommonAPI.RotationOrderZXY: "zxy",
+        UsdGeom.XformCommonAPI.RotationOrderZYX: "zyx",
+    }
+    axes = switcher.get(rotOrder, None)
+    frame = Frame.from_euler_angles(map(math.radians, rotation), static=False, axes=axes, point=translation)
+    return frame, scale
+
+
 def apply_transformation_on_prim(prim, transformation):
-    """
-    """
+    """ """
     xform = UsdGeom.Xformable(prim)
     transform = xform.AddTransformOp()
     matrix = gfmatrix4d_from_transformation(transformation)

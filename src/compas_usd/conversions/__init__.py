@@ -18,6 +18,7 @@ from .transformations import (
     xform_rotate_from_frame,
     apply_transformation_on_prim,
     apply_rotate_and_translate_on_prim,
+    frame_and_scale_from_prim,
 )
 
 __all__ = [
@@ -33,4 +34,5 @@ __all__ = [
     "xform_rotate_from_frame",
     "apply_transformation_on_prim",
     "apply_rotate_and_translate_on_prim",
+    "frame_and_scale_from_prim",
 ]
