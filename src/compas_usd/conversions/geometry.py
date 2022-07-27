@@ -2,9 +2,17 @@ from pxr import UsdGeom
 from compas.geometry import Frame
 from compas.geometry import Box
 from compas.utilities import flatten
+from compas.geometry import transpose_matrix
+
 from .transformations import apply_rotate_and_translate_on_prim
 from .transformations import apply_transformation_on_prim
 from .transformations import frame_and_scale_from_prim
+
+
+def unflatten(array, n):
+    if len(array) % n:
+        raise ValueError("The length of the array must be a factor of n: %d %% %d == 0" % (len(array), n))
+    return [array[i : (i + n)] for i in range(0, len(array), n)]  # noqa E203
 
 
 def prim_from_box(stage, path, box):
@@ -126,3 +134,34 @@ if __name__ == "__main__":
     box = Box(Frame.worldXY(), 1, 1, 1)
     prim = prim_from_box(stage, "/box", box)
     print(box_from_prim(prim))
+
+
+def prim_from_surface(stage, path, surface):
+    """Returns a ``pxr.UsdGeom.NurbsPatch``
+
+    control_points = [[[0, 0, 0], [0, 4, 0], [0, 8, -3]], [[2, 0, 6], [2, 4, 0], [2, 8, 0]], [[4, 0, 0], [4, 4, 0], [4, 8, 3]], [[6, 0, 0], [6, 4, -3], [6, 8, 0]]]
+    degree = (3, 2)
+    surface = Surface(control_points, degree)
+    prim_from_surface(stage, "/surface", surface)
+    UsdGeom.NurbsPatch(Usd.Prim(</surface>))
+    """
+    degree_u, degree_v = surface.degree
+    knot_vector_u, knot_vector_v = surface.knot_vector
+    count_u, count_v = surface.count
+
+    # upside down
+    weights = list(flatten(surface.weights))
+    weights = list(flatten(transpose_matrix(unflatten(weights, count_v))))
+    points = list(flatten(surface.control_points))
+    points = list(flatten(transpose_matrix(unflatten(points, count_v))))
+
+    prim = UsdGeom.NurbsPatch.Define(stage, path)
+    prim.CreateUVertexCountAttr(count_u)
+    prim.CreateVVertexCountAttr(count_v)
+    prim.CreateUOrderAttr(degree_u + 1)
+    prim.CreateVOrderAttr(degree_v + 1)
+    prim.CreateUKnotsAttr(knot_vector_u)
+    prim.CreateVKnotsAttr(knot_vector_v)
+    prim.CreatePointWeightsAttr(weights)
+    prim.CreatePointsAttr(points)
+    return prim
