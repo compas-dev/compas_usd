@@ -102,3 +102,8 @@ def apply_rotate_and_translate_on_prim(prim, frame):
 
     UsdGeom.XformCommonAPI(prim).SetRotate(euler_angles)
     UsdGeom.XformCommonAPI(prim).SetTranslate(tuple(frame.point))
+
+
+def translate_and_orient_from_frame(frame):
+    w, x, y, z = Rotation.from_frame(frame).quaternion.wxyz
+    return Gf.Vec3f(*frame.point), Gf.Quatd(w, x, y, z)
