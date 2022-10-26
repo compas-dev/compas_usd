@@ -2,4 +2,7 @@
 
 COMPAS wrapper for USD (Universal Scene Description)
 
-More info coming soon. 
+Provides: 
+
+    * Conversions between COMPAS geometry and USD prims
+    * Conversions between COMPAS and USD material
