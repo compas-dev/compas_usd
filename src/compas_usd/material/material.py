@@ -36,8 +36,6 @@ class USDMaterial(object):
         elif path:
             material_path = path
             self.material = stage.GetPrimAtPath(path)
-            print(self.material.GetTypeName())
-            print("self.material ", self.material)
         else:
             raise ValueError("Please pass name or path")
 
@@ -100,6 +98,8 @@ class USDMaterial(object):
             "inputs:roughness"
             "inputs:specularColor"
             "inputs:useSpecularWorkflow"
+
+        raise NotImplementedError
 
         return Material(
             name=None,
