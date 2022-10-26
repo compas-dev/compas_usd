@@ -83,7 +83,7 @@ class USDMaterial(object):
 
         for name in shader.GetPropertyNames():
             if name in ["info:id", "info:implementationSource", "outputs:displacement", "outputs:surface"]:
-                continue
+                continue  # TODO
 
             "inputs:clearcoat"
             "inputs:clearcoatRoughness"
@@ -98,8 +98,6 @@ class USDMaterial(object):
             "inputs:roughness"
             "inputs:specularColor"
             "inputs:useSpecularWorkflow"
-
-        raise NotImplementedError
 
         return Material(
             name=None,
