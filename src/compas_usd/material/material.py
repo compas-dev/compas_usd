@@ -165,11 +165,11 @@ class USDPreviewSurface(object):
 
     def _texture_info_by_index(self, index):
         texture_info = self.material.textures[index]
-        texture_info.file = self.material.image_uris[texture_info.source]  # TODO: not so elegant
+        texture_info.file = self.material.image_uris[texture_info.index]  # TODO: not so elegant
         return texture_info
 
-    def _uv_texture(self, name, texture_info, scale_factor):
-        return USDUVTexture(name, self.stage, self.material, texture_info, scale_factor, [self._st0, self._st1])
+    def _uv_texture(self, name, texture_info, scale_factor, fallback=None):
+        return USDUVTexture(name, self.stage, self.material, texture_info, scale_factor, [self._st0, self._st1], fallback=fallback)
 
     def _apply_on_shader(self, uv_texture, mode, apply_on):
         texture_shader = uv_texture.get_shader()
@@ -186,9 +186,9 @@ class USDPreviewSurface(object):
         if normal_texture is None:
             self._normal.Set((0, 0, 1))
         else:
-            scale_factor = normal_texture.scale + [1.0]
+            scale_factor = [normal_texture.scale for _ in range(3)] + [1.0]
             texture_info = self._texture_info_by_index(normal_texture.index)
-            uv_texture = self._uv_texture("normalTexture", texture_info, scale_factor)
+            uv_texture = self._uv_texture("normalTexture", texture_info, scale_factor, fallback=scale_factor)
             self._apply_on_shader(uv_texture, "rgb", self._normal)
 
     def _set_emissive_texture(self, material):
@@ -213,10 +213,10 @@ class USDPreviewSurface(object):
             uv_texture = self._uv_texture("occlusionTexture", texture_info, scale_factor)
             self._apply_on_shader(uv_texture, "r", self._occlusion)
 
-    def _set_pbr_metallic_roughness(self, gltf_material):
-        pbr_metallic_roughness = gltf_material.pbr_metallic_roughness
+    def _set_pbr_metallic_roughness(self, material):
+        pbr_metallic_roughness = material.pbr_metallic_roughness
         if pbr_metallic_roughness is not None:
-            self._set_pbr_base_color(pbr_metallic_roughness, gltf_material.alpha_mode)
+            self._set_pbr_base_color(pbr_metallic_roughness, material.alpha_mode)
             self._set_pbr_metallic(pbr_metallic_roughness)
             self._set_pbr_roughness(pbr_metallic_roughness)
 
@@ -254,7 +254,7 @@ class USDPreviewSurface(object):
 
     def _set_pbr_specular_glossiness_glossiness(self, pbr_specular_glossiness):
         specular_glossiness_texture = pbr_specular_glossiness.specular_glossiness_texture
-        glossiness_factor = pbr_specular_glossiness.glossiness_factor or 1.0
+        glossiness_factor = 1.0 if pbr_specular_glossiness.glossiness_factor is None else pbr_specular_glossiness.glossiness_factor
         roughness_factor = 1 - glossiness_factor
         if specular_glossiness_texture is None:
             self._roughness.Set(roughness_factor)
@@ -280,13 +280,13 @@ class USDPreviewSurface(object):
             texture_info = self._texture_info_by_index(base_color_texture.index)
             uv_texture = self._uv_texture("baseColorTexture", texture_info, scale_factor)
             self._apply_on_shader(uv_texture, "rgb", self._diffuse_color)
-            if AlphaMode(alpha_mode) != AlphaMode.OPAQUE:
+            if alpha_mode != AlphaMode.OPAQUE:
                 self._apply_on_shader(uv_texture, "a", self._opacity)
 
     def _set_pbr_metallic(self, pbr_metallic_roughness):
         metallic_roughness_texture = pbr_metallic_roughness.metallic_roughness_texture
-        metallic_factor = pbr_metallic_roughness.metallic_factor
-        if not metallic_roughness_texture or metallic_factor == 0:
+        metallic_factor = 1.0 if pbr_metallic_roughness.metallic_factor is None else pbr_metallic_roughness.metallic_factor
+        if not metallic_roughness_texture:
             self._metallic.Set(metallic_factor)
         else:
             scale_factor = [metallic_factor for _ in range(4)]
@@ -296,8 +296,8 @@ class USDPreviewSurface(object):
 
     def _set_pbr_roughness(self, pbr_metallic_roughness):
         metallic_roughness_texture = pbr_metallic_roughness.metallic_roughness_texture
-        roughness_factor = pbr_metallic_roughness.roughness_factor
-        if not metallic_roughness_texture or roughness_factor == 0:
+        roughness_factor = 1.0 if pbr_metallic_roughness.roughness_factor is None else pbr_metallic_roughness.roughness_factor
+        if not metallic_roughness_texture:
             self._roughness.Set(roughness_factor)
         else:
             scale_factor = [roughness_factor for i in range(4)]
@@ -335,7 +335,7 @@ class USDUVTexture(object):
         TextureWrap.REPEAT.name: "repeat",
     }
 
-    def __init__(self, name, stage, usd_material, texture, scale_factor, usd_primvar_st_arr):
+    def __init__(self, name, stage, usd_material, texture, scale_factor, usd_primvar_st_arr, fallback=None):
 
         material_path = usd_material.GetPath()
         self._texture_shader = UsdShade.Shader.Define(stage, material_path.AppendChild(name))
@@ -351,6 +351,9 @@ class USDUVTexture(object):
             fallback = (0, 0, 0, 1)
         else:
             scale_factor = tuple(scale_factor)
+        if not fallback:
+            fallback = (0, 0, 0, 1)
+        else:
             fallback = tuple(fallback)
         self._scale = self._texture_shader.CreateInput("scale", Sdf.ValueTypeNames.Float4)
         self._scale.Set(scale_factor)
@@ -389,19 +392,21 @@ if __name__ == "__main__":
     image_uri = "compas_icon_white.png"
     image_file = os.path.join(dirname, image_uri)
     image_data = Image(name=image_uri, mime_type=MineType.PNG, uri=image_file)
-    image_idx = scene.add_image(image_data)
-    texture = Texture(source=image_idx)
-    texture_idx = scene.add_texture(texture)
 
-    texture = Texture(source=image_idx)
-    texture_idx2 = scene.add_texture(texture)
+    # image_idx = scene.add_image(image_data)
+    # texture = Texture(source=image_idx)
+    # texture_idx = scene.add_texture(texture)
+    texture = Texture(source=image_data)
+
+    # texture = Texture(source=image_idx)
+    # texture_idx2 = scene.add_texture(texture)
 
     material = Material()
     material.name = "Texture"
     material.pbr_metallic_roughness = PBRMetallicRoughness()
     material.pbr_metallic_roughness.metallic_factor = 0.0
-    material.pbr_metallic_roughness.base_color_texture = TextureInfo(index=texture_idx)
-    material_key = scene.add_material(material)
+    # material.pbr_metallic_roughness.base_color_texture = TextureInfo(index=texture_idx)
+    material.pbr_metallic_roughness.base_color_texture = TextureInfo(index=texture)
 
     # add extension
     material.pbr_specular_glossiness = PBRSpecularGlossiness()
@@ -409,15 +414,34 @@ if __name__ == "__main__":
     material.pbr_specular_glossiness.specular_factor = [0.0, 0.0, 0.0]
     material.pbr_specular_glossiness.glossiness_factor = 0.0
     texture_transform = TextureTransform(rotation=0.0, scale=[2.0, 2.0])
-    material.pbr_specular_glossiness.diffuse_texture = TextureInfo(texture_idx2)
+    # material.pbr_specular_glossiness.diffuse_texture = TextureInfo(texture_idx2)
+    material.pbr_specular_glossiness.diffuse_texture = TextureInfo(index=texture)
     material.pbr_specular_glossiness.diffuse_texture.texture_transform = texture_transform
+
+    material_key = scene.add_material(material)
 
     # add box
     box = Box(Frame.worldXY(), 1, 1, 1)
     mesh = Mesh.from_shape(box)
     mesh.quads_to_triangles()
 
-    node = scene.add_layer("mesh", parent=world, element=box, material=material_key)
+    normals = [mesh.vertex_normal(k) for k in mesh.vertices()]
+    texture_coordinates = [
+        (0.0, 1.0),
+        (0.0, 0.0),
+        (1.0, 0.0),
+        (1.0, 1.0),
+        (0.0, 0.0),
+        (1.0, 0.0),
+        (1.0, 1.0),
+        (0.0, 1.0),
+    ]
+    print(len(texture_coordinates))
+
+    for k, v in zip(mesh.vertices(), texture_coordinates):
+        mesh.vertex_attribute(k, "texture_coordinate", value=v)
+
+    node = scene.add_layer("mesh", parent=world, element=mesh, material=material_key)  # why material key???
     print("node", node)
 
     data_before = scene.data
@@ -427,6 +451,8 @@ if __name__ == "__main__":
     data_after = scene.data
 
     print(data_before == data_after)
+
+    scene.to_usd(os.path.join(compas.APPDATA, "data", "gltfs", "material.usda"))
 
     """
     for k, v in data_before.items():
@@ -444,22 +470,6 @@ if __name__ == "__main__":
 
         print()
     """
-
-    normals = [mesh.vertex_normal(k) for k in mesh.vertices()]
-
-    texcoord_0 = [(0, 0) for _ in mesh.vertices()]
-
-    # would work better if each vertex could have 4 different texture coordinates
-    texcoord_0 = [
-        (0.0, 1.0),
-        (0.0, 0.0),
-        (1.0, 0.0),
-        (1.0, 1.0),
-        (0.0, 0.0),
-        (1.0, 0.0),
-        (1.0, 1.0),
-        (0.0, 1.0),
-    ]
 
     """
     pd = node.mesh_data.primitive_data_list[0]
