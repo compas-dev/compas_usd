@@ -20,6 +20,7 @@ from .transformations import (
     apply_rotate_and_translate_on_prim,
     frame_and_scale_from_prim,
 )
+from .scene import stage_from_scene
 
 __all__ = [
     "prim_from_box",
@@ -36,4 +37,5 @@ __all__ = [
     "apply_transformation_on_prim",
     "apply_rotate_and_translate_on_prim",
     "frame_and_scale_from_prim",
+    "stage_from_scene",
 ]
