@@ -1,7 +1,7 @@
 from pxr import UsdGeom
 from compas.geometry import Frame
 from compas.geometry import Box
-from compas.utilities import flatten
+from compas.itertools import flatten
 from compas.geometry import transpose_matrix
 
 from .transformations import apply_rotate_and_translate_on_prim
@@ -76,7 +76,7 @@ def prim_from_sphere(stage, path, sphere):
     """
     prim = UsdGeom.Sphere.Define(stage, path)
     prim.GetPrim().GetAttribute("radius").Set(sphere.radius)
-    UsdGeom.XformCommonAPI(prim).SetTranslate(tuple(sphere.point))
+    UsdGeom.XformCommonAPI(prim).SetTranslate(tuple(sphere.frame.point))
     return prim
 
 
